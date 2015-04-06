@@ -1,0 +1,1 @@
+httplib fossa:  https://github.com/cesanta/fossa.git (currently needs alex's fork: https://github.com/kaplan2539/fossa.git)
