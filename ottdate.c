@@ -11,6 +11,38 @@ static int s_exit_flag = 0;
 static int s_show_headers = 0;
 static const char *s_show_headers_opt = "--show-headers";
 
+static void process_data( const char *json, int json_len )
+{
+    struct json_token *arr, *tok;
+
+		// Tokenize json string, fill in tokens array
+		arr = parse_json2(json, strlen(json));
+
+		tok = find_json_token(arr, "update_available");
+		if(tok!=NULL) {
+			fprintf(stderr,"update_available= [%.*s]\n", tok->len, tok->ptr);
+		}
+		tok = find_json_token(arr, "url");
+		if(tok!=NULL) {
+			fprintf(stderr,"url= [%.*s]\n", tok->len, tok->ptr);
+		}
+		tok = find_json_token(arr, "size");
+		if(tok!=NULL) {
+			fprintf(stderr,"size= [%d]\n", atoi(tok->ptr));
+		}
+		tok = find_json_token(arr, "checksum");
+		if(tok!=NULL) {
+			fprintf(stderr,"checksum= [%.*s]\n", tok->len, tok->ptr);
+		}
+		tok = find_json_token(arr, "new_version");
+		if(tok!=NULL) {
+			fprintf(stderr,"new_version= [%.*s]\n", tok->len, tok->ptr);
+		}
+
+		// Do not forget to free allocated tokens array
+		free(arr);
+}
+
 static void ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
   struct http_message *hm = (struct http_message *) ev_data;
 
@@ -22,15 +54,23 @@ static void ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
       }
       break;
     case NS_HTTP_REPLY:
+			fprintf(stderr,"\nNS_HTTP_REPLY\n");
       nc->flags |= NSF_CLOSE_IMMEDIATELY;
-      if (s_show_headers) {
-        fwrite(hm->message.p, 1, hm->message.len, stdout);
-      } else {
-        fwrite(hm->body.p, 1, hm->body.len, stdout);
-      }
+
+			struct ns_str* content=ns_get_http_header(hm,"Content-Type");
+			if( content ) {	
+				char *content_type="application/json";
+				if( !strncmp(content_type,content->p, strlen(content_type)) )
+					process_data(hm->body.p, hm->body.len);
+			}
+
       putchar('\n');
       s_exit_flag = 1;
       break;
+		case NS_RECV:
+			fprintf(stderr,".");
+      break;
+
     default:
       break;
   }
@@ -58,12 +98,6 @@ int main(int argc, char *argv[]) {
             argv[0], s_show_headers_opt);
     exit(EXIT_FAILURE);
   }
-
-  fprintf(stderr,"url=%s\n",argv[i]);
-
-  char buf[4096];
-  ns_resolve(argv[i],buf,4096);
-  fprintf(stderr,"ip=%s\n",buf);
 
   ns_connect_http(&mgr, ev_handler, argv[i], NULL, NULL);
 
