@@ -43,7 +43,7 @@ static void process_data( const char *json, int json_len )
 		free(arr);
 }
 
-static void ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
+static void http_ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
   struct http_message *hm = (struct http_message *) ev_data;
 
   switch (ev) {
@@ -71,6 +71,10 @@ static void ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
 			fprintf(stderr,".");
       break;
 
+		case NS_CLOSE:
+      s_exit_flag = 1;
+      break;
+
     default:
       break;
   }
@@ -83,24 +87,32 @@ int main(int argc, char *argv[])
 
   ns_mgr_init(&mgr, NULL);
 
+	char *out_file=NULL;
   /* Process command line arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], s_show_headers_opt) == 0) {
       s_show_headers = 1;
-    } else if (strcmp(argv[i], "--hexdump") == 0 && i + 1 < argc) {
+    } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+      out_file = argv[++i];
+		} else if (strcmp(argv[i], "--hexdump") == 0 && i + 1 < argc) {
       mgr.hexdump_file = argv[++i];
     } else {
       break;
     }
   }
 
+  char *url=0;
   if (i + 1 != argc) {
-    fprintf(stderr, "Usage: %s [%s] [--hexdump <file>] <URL>\n",
-            argv[0], s_show_headers_opt);
-    exit(EXIT_FAILURE);
+//    fprintf(stderr, "Usage: %s [%s] [--hexdump <file>] <URL>\n",
+//            argv[0], s_show_headers_opt);
+//    exit(EXIT_FAILURE);
+
+    url="http://update.s-t-a-k.com";
+  } else {
+      url=argv[i];
   }
 
-  ns_connect_http(&mgr, ev_handler, argv[i], NULL, NULL);
+  ns_connect_http(&mgr, http_ev_handler, url, NULL, NULL, out_file);
 
   while (s_exit_flag == 0) {
     ns_mgr_poll(&mgr, 1000);
