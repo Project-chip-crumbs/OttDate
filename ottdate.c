@@ -76,7 +76,8 @@ static void ev_handler(struct ns_connection *nc, int ev, void *ev_data) {
   }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   struct ns_mgr mgr;
   int i;
 
