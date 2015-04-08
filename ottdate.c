@@ -257,15 +257,15 @@ char* getRaspiSerial()
 	fgets(buf,sizeof(buf),fp);
 	while(!feof(fp))
 	{
-		char *tok = strtok(buf,"\n\r :");
+		char *tok = strtok(buf,"\n\r\t :");
 		while(tok) {
 			if(!strcmp(tok,"Serial")) {
 				fprintf(stderr,"thats it: %s=",tok);
-				char *r = strtok(NULL,"\n\r :");
+				char *r = strtok(NULL,"\n\r\t :");
 				fprintf(stderr,"%s\n",r);	
 				return r;
 			} else fprintf(stderr,"not it: [%s]\n",tok);
-			tok = strtok(NULL,"\n\r :");
+			tok = strtok(NULL,"\n\r\t :");
 		}
 
 		fgets(buf,sizeof(buf),fp);
