@@ -246,12 +246,53 @@ int verify_md5(const char *filename,const char* md5sum)
     return 0;
 }
 
+char* getRaspiSerial()
+{
+	static char buf[4096]="UNKNOWN";
+	FILE *fp = NULL;
+  if(!(fp = fopen("/proc/cpuinfo","r"))) {
+		return buf;
+	}
+	
+	fgets(buf,sizeof(buf),fp);
+	while(!feof(fp))
+	{
+		char *tok = strtok(buf,"\n\r :");
+		while(tok) {
+			if(!strcmp(tok,"Serial")) {
+				fprintf(stderr,"thats it: %s=",tok);
+				char *r = strtok(NULL,"\n\r :");
+				fprintf(stderr,"%s\n",r);	
+				return r;
+			} else fprintf(stderr,"not it: %s\n",tok);
+			tok = strtok(NULL,"\n\r :");
+		}
+
+		fgets(buf,sizeof(buf),fp);
+	}
+
+	sprintf(buf,"UNKNOWN");
+	return buf;
+}
+
 int main(int argc, char *argv[])
 {
   struct ns_mgr mgr;
   char *url="http://update.s-t-a-k.com";
 
 	EState last_state =  EState_Undefined;
+
+	//assemble data for request:
+	int post_data_len=1024;
+	char post_data[post_data_len];
+	json_emit( post_data, post_data_len
+           , "{s: s, s: s, s: i, s: s}"
+           , "product", "otto"
+           , "component", "fullstak"
+           , "version", 101
+           , "id", getRaspiSerial()
+           );
+	//TODO: READ version from STAK
 
 	while(1)
 	{
@@ -271,8 +312,10 @@ int main(int argc, char *argv[])
 				//TODO: check for power: cur_state=EState_NoPower;
 				//TODO: check for internet: cur_state=EState_NoInternet;
 
+			  fprintf(stderr,"sending json: %s\n",post_data);
+
 				ns_mgr_init(&mgr, NULL);
-				ns_connect_http(&mgr, handler_EState_Check, url, NULL, NULL, NULL);
+				ns_connect_http(&mgr, handler_EState_Check, url, NULL, post_data, NULL);
 				s_exit_flag=0;
 				while (s_exit_flag == 0) {
 					ns_mgr_poll(&mgr, 1000);
