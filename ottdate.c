@@ -317,13 +317,15 @@ int main(int argc, char *argv[])
 				break;
       case EState_ApplyingUpdate:
 				sleep(3);
-			  cur_state=EState_UpdateFailed; 	
+			  cur_state=EState_AskForReboot; 	
 				break;
       case EState_UpdateFailed:
 				sleep(1);
 				cur_state=EState_Idle;
 				break;
       case EState_AskForReboot:
+				sleep(1);
+				cur_state=EState_Idle;
 				break;
 		}
 
