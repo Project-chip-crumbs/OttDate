@@ -264,7 +264,7 @@ char* getRaspiSerial()
 				char *r = strtok(NULL,"\n\r :");
 				fprintf(stderr,"%s\n",r);	
 				return r;
-			} else fprintf(stderr,"not it: %s\n",tok);
+			} else fprintf(stderr,"not it: [%s]\n",tok);
 			tok = strtok(NULL,"\n\r :");
 		}
 
