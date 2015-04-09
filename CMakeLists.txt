@@ -13,3 +13,4 @@ set(FOSSA_C fossa.c)
 
 add_executable( ottdate ottdate.c ${FOSSA_C} )
 target_link_libraries( ottdate ${OPENSSL_LIBRARIES} )
+install( TARGETS ottdate DESTINATION bin)
