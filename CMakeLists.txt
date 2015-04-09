@@ -4,7 +4,7 @@ project( OttDate )
 
 find_package( OpenSSL REQUIRED )
 
-set( FOSSA_DIR "${CMAKE_SOURCE_DIR}/../fossa" )
+set( FOSSA_DIR "${CMAKE_SOURCE_DIR}" )
 find_file( FOSSA_C "fossa.c" ${FOSSA_DIR} )
 include_directories( ${FOSSA_DIR} )
 
