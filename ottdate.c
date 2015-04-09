@@ -172,6 +172,12 @@ static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *e
 			fprintf(stderr,".");
       break;
 
+    case NS_HTTP_REPLY:
+			//we might get here if we cannot open the destination file for opening...
+      nc->flags |= NSF_CLOSE_IMMEDIATELY;
+      s_exit_flag = 1;
+			break;
+
 		case NS_CLOSE:
       s_exit_flag = 1;
 			cur_state=EState_Verifying;
@@ -184,28 +190,28 @@ static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *e
 }
 
 
-int getkey() {
-    int character;
-    struct termios orig_term_attr;
-    struct termios new_term_attr;
-
-    /* set the terminal to raw mode */
-    tcgetattr(fileno(stdin), &orig_term_attr);
-    memcpy(&new_term_attr, &orig_term_attr, sizeof(struct termios));
-    new_term_attr.c_lflag &= ~(ECHO|ECHONL|ICANON|IEXTEN);
-    new_term_attr.c_cc[VTIME] = 0;
-    new_term_attr.c_cc[VMIN] = 0;
-    tcsetattr(fileno(stdin), TCSANOW, &new_term_attr);
-
-    /* read a character from the stdin stream without blocking */
-    /*   returns EOF (-1) if no character is available */
-    character = fgetc(stdin);
-
-    /* restore the original terminal attributes */
-    tcsetattr(fileno(stdin), TCSANOW, &orig_term_attr);
-
-    return character;
-}
+//int getkey() {
+//    int character;
+//    struct termios orig_term_attr;
+//    struct termios new_term_attr;
+//
+//    /* set the terminal to raw mode */
+//    tcgetattr(fileno(stdin), &orig_term_attr);
+//    memcpy(&new_term_attr, &orig_term_attr, sizeof(struct termios));
+//    new_term_attr.c_lflag &= ~(ECHO|ECHONL|ICANON|IEXTEN);
+//    new_term_attr.c_cc[VTIME] = 0;
+//    new_term_attr.c_cc[VMIN] = 0;
+//    tcsetattr(fileno(stdin), TCSANOW, &new_term_attr);
+//
+//    /* read a character from the stdin stream without blocking */
+//    /*   returns EOF (-1) if no character is available */
+//    character = fgetc(stdin);
+//
+//    /* restore the original terminal attributes */
+//    tcsetattr(fileno(stdin), TCSANOW, &orig_term_attr);
+//
+//    return character;
+//}
 
 int verify_md5(const char *filename,const char* md5sum)
 {
@@ -237,13 +243,7 @@ int verify_md5(const char *filename,const char* md5sum)
            , md5sum
            , r==0 ? "==" : "!="
            , d );
-		if(r==0) {
-			cur_state=EState_ApplyingUpdate;
-		} else {
-			cur_state=EState_DownloadFailed;
-		}
-
-    return 0;
+    return r;
 }
 
 char* getRaspiSerial()
@@ -277,6 +277,7 @@ int main(int argc, char *argv[])
 {
   struct ns_mgr mgr;
   char *url="http://update.s-t-a-k.com";
+	char *output_filename="ottdate.zip";
 
 	EState last_state =  EState_Undefined;
 
@@ -292,18 +293,24 @@ int main(int argc, char *argv[])
            );
 	//TODO: READ version from STAK
 
+	//for now: just immediately trigger the update
+	cur_state=EState_Checking;
+
 	while(1)
 	{
 		if(last_state!=cur_state) {
 			fprintf(stderr,"switched to state %s\n",StateNames[cur_state]);
-			last_state=cur_state;
 		}
 
 		switch(cur_state)
 	  {
       case EState_Idle:
-				if(getkey()==0x20)
-					cur_state=EState_Checking;
+				
+				//for now: quit in idle state
+				fprintf(stderr,"last state %s\n",StateNames[last_state]);
+				exit(last_state);
+				last_state=cur_state;
+				cur_state=EState_Checking;
 				break;
 
 			case EState_Checking:
@@ -324,22 +331,25 @@ int main(int argc, char *argv[])
 
       case EState_NoUpdate:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
 
       case EState_NoInternet:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
 
       case EState_NoPower:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
 
       case EState_Downloading:
 				ns_mgr_init(&mgr, NULL);
-				ns_connect_http(&mgr, handler_EState_Downloading, update_response.url, NULL, NULL, "update.zip");
+				ns_connect_http(&mgr, handler_EState_Downloading, update_response.url, NULL, NULL, output_filename);
 				s_exit_flag=0;
 				while (s_exit_flag == 0) {
 					ns_mgr_poll(&mgr, 1000);
@@ -349,23 +359,33 @@ int main(int argc, char *argv[])
 				break;
 
       case EState_Verifying:
-				verify_md5("update.zip",update_response.checksum);
+				if(verify_md5(output_filename,update_response.checksum)) {
+					last_state=cur_state;
+					cur_state=EState_DownloadFailed;
+				} else {
+					last_state=cur_state;
+					cur_state=EState_ApplyingUpdate;
+				}
 				break;
 
-      case EState_DownloadFailed:
+			case EState_DownloadFailed:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
       case EState_ApplyingUpdate:
 				sleep(3);
+				last_state=cur_state;
 			  cur_state=EState_AskForReboot; 	
 				break;
       case EState_UpdateFailed:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
       case EState_AskForReboot:
 				sleep(1);
+				last_state=cur_state;
 				cur_state=EState_Idle;
 				break;
 		}
