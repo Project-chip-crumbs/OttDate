@@ -2536,9 +2536,11 @@ static void http_handler(struct ns_connection *nc, int ev, void *ev_data) {
     } else if (req_len == 0) {
       /* Do nothing, request is not yet fully buffered */
     } else if (nc->listener == NULL && dp!=NULL && dp->type==DATA_FILE_DOWNLOAD ) {
-      iobuf_remove(io, req_len);
+      /* OK we got the header and switch to a special file download handler */
       dp->cl = hm.message.len - req_len;
       nc->proto_handler = http_download_handler;
+      nc->handler(nc, NS_HTTP_REPLY, &hm);
+      iobuf_remove(io, req_len);
       http_download_handler(nc, NS_RECV, ev_data);
     } else if (nc->listener == NULL &&
                ns_get_http_header(&hm, "Sec-WebSocket-Accept")) {
