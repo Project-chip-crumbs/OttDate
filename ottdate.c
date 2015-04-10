@@ -10,10 +10,7 @@
 #include <unistd.h>
 
 #define MD5_DIGEST_LENGTH 16
-
 static int s_exit_flag = 0;
-static int s_show_headers = 0;
-static const char *s_show_headers_opt = "--show-headers";
 
 typedef struct UpdateResponse 
 {
@@ -105,9 +102,7 @@ static void process_data( const char *json, int json_len )
 
 		if(update_response.update_available) {
 			cur_state = EState_Downloading;
-	  }
-		else
-		{
+	  } else {
 			cur_state = EState_NoUpdate;
 	  }
 }
@@ -143,10 +138,6 @@ static void handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data
       s_exit_flag = 1;
       break;
 
-//		case NS_RECV:
-//			fprintf(stderr,".");
-//      break;
-
 		case NS_CLOSE:
       s_exit_flag = 1;
       break;
@@ -158,6 +149,12 @@ static void handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data
 
 static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *ev_data) {
   struct http_message *hm = (struct http_message *) ev_data;
+  struct ns_str* content=0;
+
+	static int full=0;
+	static int some=0;
+	char progress[]="-\\|/";
+	static int progress_i=0;
 
   switch (ev) {
     case NS_CONNECT:
@@ -169,19 +166,25 @@ static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *e
       break;
 
 		case NS_RECV:
-			fprintf(stderr,".");
+			some+=*(int*)ev_data;
+			if(full>0) {
+				fprintf(stderr,"\rdownloading: %10d / %10d",some,full);
+  		} else {
+				fprintf(stderr,"\rdownloading: %c",progress[(progress_i++)%4]);
+			}
       break;
 
     case NS_HTTP_REPLY:
-			//we might get here if we cannot open the destination file for opening...
-      nc->flags |= NSF_CLOSE_IMMEDIATELY;
-      s_exit_flag = 1;
+				// we get here as soon as we have the http req header,
+        // before the file download starts
+			  full=hm->message.len;
 			break;
 
 		case NS_CLOSE:
       s_exit_flag = 1;
+      nc->flags |= NSF_CLOSE_IMMEDIATELY;
 			cur_state=EState_Verifying;
-			putchar('\n');
+			fprintf(stderr,"\rdownloading done");
       break;
 
     default:
@@ -189,29 +192,6 @@ static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *e
   }
 }
 
-
-//int getkey() {
-//    int character;
-//    struct termios orig_term_attr;
-//    struct termios new_term_attr;
-//
-//    /* set the terminal to raw mode */
-//    tcgetattr(fileno(stdin), &orig_term_attr);
-//    memcpy(&new_term_attr, &orig_term_attr, sizeof(struct termios));
-//    new_term_attr.c_lflag &= ~(ECHO|ECHONL|ICANON|IEXTEN);
-//    new_term_attr.c_cc[VTIME] = 0;
-//    new_term_attr.c_cc[VMIN] = 0;
-//    tcsetattr(fileno(stdin), TCSANOW, &new_term_attr);
-//
-//    /* read a character from the stdin stream without blocking */
-//    /*   returns EOF (-1) if no character is available */
-//    character = fgetc(stdin);
-//
-//    /* restore the original terminal attributes */
-//    tcsetattr(fileno(stdin), TCSANOW, &orig_term_attr);
-//
-//    return character;
-//}
 
 int verify_md5(const char *filename,const char* md5sum)
 {
@@ -326,7 +306,6 @@ int main(int argc, char *argv[])
 					ns_mgr_poll(&mgr, 1000);
 				}
 				ns_mgr_free(&mgr);
-
 				break;
 
       case EState_NoUpdate:
