@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define MD5_DIGEST_LENGTH 16
-static int s_exit_flag = 0;
+
 
 typedef struct UpdateResponse 
 {
@@ -36,6 +36,13 @@ typedef enum EState
 , EState_Undefined       = 0xffff
 } EState;
 
+
+// nasty global variables
+static int s_exit_flag = 0;
+static UpdateResponse update_response;
+static EState cur_state =  EState_Idle;
+static struct http_message last_http_message;
+
 char *StateNames[] =
 { "EState_Idle"
 , "EState_Checking"
@@ -50,16 +57,18 @@ char *StateNames[] =
 , "EState_AskForReboot"
 };
 
-static UpdateResponse update_response;
-static EState cur_state =  EState_Idle;
 
-static void process_data( const char *json, int json_len )
+static EState process_data( const char *json, int json_len )
 {
     struct json_token *arr, *tok;
 		static char buf[4096];
 
 		// Tokenize json string, fill in tokens array
 		arr = parse_json2(json, strlen(json));
+		if(!arr) {
+			fprintf(stderr,"error parsing json: [%.*s]\n",json_len,json);
+			return EState_NoUpdate;
+		}
 
 		tok = find_json_token(arr, "update_available");
 		if(tok!=NULL) {
@@ -101,10 +110,10 @@ static void process_data( const char *json, int json_len )
 		free(arr);
 
 		if(update_response.update_available) {
-			cur_state = EState_Downloading;
-	  } else {
-			cur_state = EState_NoUpdate;
-	  }
+			return EState_Downloading;
+		}
+
+		return EState_NoUpdate;
 }
 
 static void handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data) {
@@ -116,27 +125,21 @@ static void handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data
         fprintf(stderr, "connect() failed: %s\n", strerror(* (int *) ev_data));
 				cur_state=EState_NoUpdate;
         s_exit_flag = 1;
-      }
+      } else {
+				fprintf(stderr,"connected\n");
+			}
       break;
 
     case NS_HTTP_REPLY:
       nc->flags |= NSF_CLOSE_IMMEDIATELY;
 
-			struct ns_str* content=ns_get_http_header(hm,"Content-Type");
-			if( content ) {	
-				char *content_type="application/json";
-				if( !strncmp(content_type,content->p, strlen(content_type)) ) {
-					process_data(hm->body.p, hm->body.len);
-
-				}
-				else {
-					cur_state=EState_NoUpdate;
-				}
-			} else {
-				cur_state=EState_NoUpdate;
-			}
+			last_http_message = *hm;
       s_exit_flag = 1;
       break;
+
+//		case NS_RECV:
+//			fprintf(stderr,"r\n");
+//      break;
 
 		case NS_CLOSE:
       s_exit_flag = 1;
@@ -183,7 +186,6 @@ static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *e
 		case NS_CLOSE:
       s_exit_flag = 1;
       nc->flags |= NSF_CLOSE_IMMEDIATELY;
-			cur_state=EState_Verifying;
 			fprintf(stderr,"\rdownloading done");
       break;
 
@@ -256,6 +258,7 @@ char* getRaspiSerial()
 int main(int argc, char *argv[])
 {
   struct ns_mgr mgr;
+ // char *url="http://stak-images.s3.amazonaws.com/firmware/otto/update/latest";
   char *url="http://update.s-t-a-k.com";
 	char *output_filename="ottdate.zip";
 
@@ -301,11 +304,29 @@ int main(int argc, char *argv[])
 
 				ns_mgr_init(&mgr, NULL);
 				ns_connect_http(&mgr, handler_EState_Check, url, NULL, post_data, NULL);
+				//ns_connect_http(&mgr, handler_EState_Check, url, NULL, NULL, NULL);
 				s_exit_flag=0;
+			  fprintf(stderr,"entering loop\n");
 				while (s_exit_flag == 0) {
 					ns_mgr_poll(&mgr, 1000);
 				}
 				ns_mgr_free(&mgr);
+						
+				struct ns_str* content=ns_get_http_header(&last_http_message,"Content-Type");
+				if( content ) {
+					cur_state=process_data(last_http_message.body.p, last_http_message.body.len);
+
+					//char *content_type="application/json";
+					//if( !strncmp(content_type,content->p, strlen(content_type)) ) {
+					//	fprintf(stderr,"got application/json data\n");
+
+					//}
+					//else {
+					//	cur_state=EState_NoUpdate;
+					//}
+				} else {
+					cur_state=EState_NoUpdate;
+				}
 				break;
 
       case EState_NoUpdate:
@@ -334,7 +355,7 @@ int main(int argc, char *argv[])
 					ns_mgr_poll(&mgr, 1000);
 				}
 				ns_mgr_free(&mgr);
-
+				cur_state=EState_Verifying;
 				break;
 
       case EState_Verifying:
