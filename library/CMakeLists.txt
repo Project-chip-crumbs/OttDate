@@ -6,7 +6,6 @@ target_link_libraries( ottdate_static ${OPENSSL_LIBRARIES} )
 install(
   TARGETS ottdate_static
   EXPORT ${PROJECT_NAME}Targets
-  RUNTIME       DESTINATION bin     COMPONENT bin
   ARCHIVE       DESTINATION lib     COMPONENT lib
   PUBLIC_HEADER DESTINATION include COMPONENT dev
 )

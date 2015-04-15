@@ -24,6 +24,7 @@ export(TARGETS ottdate ottdate_static FILE "${PROJECT_BINARY_DIR}/${PROJECT_NAME
 export(PACKAGE ${PROJECT_NAME})
 # -- END: OttDate specific ---
 
+
 #... for the build tree
 set(CONF_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
 configure_file(${PROJECT_NAME}Config.cmake.in "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake" @ONLY)
@@ -32,7 +33,7 @@ configure_file(${PROJECT_NAME}Config.cmake.in "${PROJECT_BINARY_DIR}/${PROJECT_N
 set(CONF_INCLUDE_DIRS "\${${PROJECT_NAME_UPPER}_CMAKE_DIR}/include")
 configure_file(${PROJECT_NAME}Config.cmake.in "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/${PROJECT_NAME}Config.cmake" @ONLY)
 
-
+# create ${PROJECT_NAME}ConfigVersion.cmake
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
