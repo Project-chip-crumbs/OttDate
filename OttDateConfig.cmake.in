@@ -1,0 +1,16 @@
+# - Config file for the FooBar package
+# It defines the following variables
+#  OTTDATE_INCLUDE_DIRS - include directories for FooBar
+#  OTTDATE_LIBRARIES    - libraries to link against
+#  OTTDATE_EXECUTABLE   - the bar executable
+
+# Compute paths
+get_filename_component(OTTDATE_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+set(OTTDATE_INCLUDE_DIRS "@CONF_INCLUDE_DIRS@")
+
+# Our library dependencies (contains definitions for IMPORTED targets)
+include("${OTTDATE_CMAKE_DIR}/OttDateTargets.cmake")
+
+# These are IMPORTED targets created by OttDateTargets.cmake
+set(OTTDATE_LIBRARIES ottdate_static)
+set(OTTDATE_EXECUTABLE ottdate)

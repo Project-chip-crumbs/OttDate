@@ -7,7 +7,7 @@ OttDate*            OttDate::s_instance   = 0;
 int                 OttDate::s_exit_flag  = 0;
 OttDate::EState     OttDate::s_cur_state  = OttDate::EState_Idle;
 OttDate::EState     OttDate::s_last_state = OttDate::EState_Undefined;
-struct http_message OttDate::s_last_http_message;
+char *              OttDate::s_last_http_message = 0;
 
 const int           OttDate::MD5_DIGEST_LENGTH = 16;
 
@@ -38,6 +38,8 @@ OttDate::OttDate()
            , "version", 101
            , "id", getRaspiSerial()
            );
+
+	m_mgr = new ns_mgr;
 }
 
 
@@ -81,8 +83,8 @@ void OttDate::enter_state( OttDate::EState state )
 
 			fprintf(stderr,"sending json: %s\n",m_post_data);
 
-			ns_mgr_init(&m_mgr, NULL);
-			ns_connect_http(&m_mgr, handler_EState_Check, m_url.c_str(), NULL, m_post_data, NULL);
+			ns_mgr_init(m_mgr, NULL);
+			ns_connect_http(m_mgr, handler_EState_Check, m_url.c_str(), NULL, m_post_data, NULL);
 			//ns_connect_http(&mgr, handler_EState_Check, url, NULL, NULL, NULL);
 			s_exit_flag=0;
 			break;
@@ -97,8 +99,8 @@ void OttDate::enter_state( OttDate::EState state )
 			break;
 
 		case EState_Downloading:
-			ns_mgr_init(&m_mgr, NULL);
-			ns_connect_http( &m_mgr, handler_EState_Downloading
+			ns_mgr_init(m_mgr, NULL);
+			ns_connect_http( m_mgr, handler_EState_Downloading
                      , m_update_response.url, NULL, NULL
                      , m_output_filename.c_str()
                      );
@@ -146,15 +148,12 @@ OttDate::EState OttDate::main_loop()
 
 		case EState_Checking:
 			if (s_exit_flag == 0) {
-				ns_mgr_poll(&m_mgr, 1000);
+				ns_mgr_poll(m_mgr, 1000);
 				std::cerr<<"still checking...\n";
 			} else {
-				ns_mgr_free(&m_mgr);
+				ns_mgr_free(m_mgr);
 
-				next_state( process_data( s_last_http_message.body.p
-                                , s_last_http_message.body.len
-                                )
-                  );
+				next_state(process_data(s_last_http_message));
 			}
 			break;
 
@@ -175,9 +174,9 @@ OttDate::EState OttDate::main_loop()
 
 		case EState_Downloading:
 			if (s_exit_flag == 0) {
-				ns_mgr_poll(&m_mgr, 1000);
+				ns_mgr_poll(m_mgr, 1000);
 			} else {
-				ns_mgr_free(&m_mgr);
+				ns_mgr_free(m_mgr);
 				next_state(EState_Verifying);
 			}
 			break;
@@ -216,7 +215,7 @@ OttDate::EState OttDate::main_loop()
 }
 
 //-----------------------------------------------------------------------------
-OttDate::EState OttDate::process_data( const char *json, int json_len )
+OttDate::EState OttDate::process_data( const char *json )
 {
 	struct json_token *arr, *tok;
 	static char buf[4096];
@@ -224,7 +223,7 @@ OttDate::EState OttDate::process_data( const char *json, int json_len )
 	// Tokenize json string, fill in tokens array
 	arr = parse_json2(json, strlen(json));
 	if(!arr) {
-		fprintf(stderr,"error parsing json: [%.*s]\n",json_len,json);
+		fprintf(stderr,"error parsing json: [%s]\n",json);
 		return EState_NoUpdate;
 	}
 
@@ -296,7 +295,13 @@ void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_da
 		case NS_HTTP_REPLY:
 			nc->flags |= NSF_CLOSE_IMMEDIATELY;
 
-			s_last_http_message = *hm;
+			if (s_last_http_message) {
+				delete s_last_http_message;
+			}
+		  s_last_http_message = new char[hm->body.len+1];
+			strncpy(s_last_http_message,hm->body.p,hm->body.len);
+			s_last_http_message[hm->body.len] = 0;
+
 			s_exit_flag = 1;
 			break;
 
