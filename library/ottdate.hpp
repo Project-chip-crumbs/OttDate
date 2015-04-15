@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "fossa.h"
+struct ns_mgr;
 
 class OttDate
 {
@@ -49,28 +49,28 @@ private:
 	void enter_state( OttDate::EState state );
   char* getRaspiSerial();
 
-	EState process_data( const char *json, int json_len );
+	EState process_data( const char *json );
 	
 	static void handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data);
 	static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *ev_data);
 
   int verify_md5(const std::string &filename,const std::string &md5sum);
 
-//-------
-	std::vector<std::string> m_state_names;
+	
+  std::vector<std::string> m_state_names;
 	int                      m_post_data_len;
   char *                   m_post_data;
-  struct ns_mgr            m_mgr;
+  struct ns_mgr*           m_mgr;
 	std::string              m_url;
 	std::string              m_output_filename;
 	UpdateResponse           m_update_response;
 
-	static struct http_message s_last_http_message;
-	static int                 s_exit_flag;
-  static EState              s_cur_state;
-  static EState              s_last_state;
+	static char *            s_last_http_message;
+	static int               s_exit_flag;
+  static EState            s_cur_state;
+  static EState            s_last_state;
 
-	const static int MD5_DIGEST_LENGTH;
+	const static int         MD5_DIGEST_LENGTH;
 };
 
 #endif //OTTDATE_HPP
