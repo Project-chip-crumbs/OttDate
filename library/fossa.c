@@ -1,4 +1,6 @@
 #include "fossa.h"
+#include "log.h"
+
 #ifdef NS_MODULE_LINES
 #line 1 "src/internal.h"
 /**/
@@ -1026,6 +1028,8 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
                                                     int proto,
                                                     union socket_address *sa,
                                                     struct ns_add_sock_opts o) {
+	LOG_MESSAGE_ENTER();
+
   sock_t sock = INVALID_SOCKET;
   int rc;
 
@@ -1038,6 +1042,8 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     ns_call(nc, NS_CONNECT, &failure);
     ns_call(nc, NS_CLOSE, NULL);
     ns_destroy_conn(nc);
+		LOG_MSG("cannot create socket");
+		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1050,6 +1056,8 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     ns_call(nc, NS_CLOSE, NULL);
     ns_destroy_conn(nc);
     close(sock);
+		LOG_MSG("cannot connect to socket");
+		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1063,6 +1071,7 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     nc->flags |= NSF_CONNECTING;
   }
 
+	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
@@ -1164,6 +1173,7 @@ struct ns_connection *ns_connect(struct ns_mgr *mgr, const char *address,
 struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
                                      ns_event_handler_t callback,
                                      struct ns_connect_opts opts) {
+	LOG_MESSAGE_ENTER();
   struct ns_connection *nc = NULL;
   int proto, rc;
   struct ns_add_sock_opts add_sock_opts;
@@ -1172,12 +1182,16 @@ struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
   NS_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
 
   if ((nc = ns_create_connection(mgr, callback, add_sock_opts)) == NULL) {
+		LOG_MSG("ns_create_connection returned NULL");
+		LOG_MESSAGE_LEAVE();
     return NULL;
   } else if ((rc = ns_parse_address(address, &nc->sa, &proto, host,
                                     sizeof(host))) < 0) {
     /* Address is malformed */
     NS_SET_PTRPTR(opts.error_string, "cannot parse address");
     ns_destroy_conn(nc);
+		LOG_MESSAGE("could not parse address: %s\n",address);
+		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1195,18 +1209,21 @@ struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
     if (ns_resolve_async(nc->mgr, host, NS_DNS_A_RECORD, resolve_cb, nc) != 0) {
       NS_SET_PTRPTR(opts.error_string, "cannot schedule DNS lookup");
       ns_destroy_conn(nc);
+			LOG_MSG("cannot schedule DNS lookup");
+			LOG_MESSAGE_LEAVE();
       return NULL;
     }
     return nc;
   } else {
     /* Address is parsed and resolved to IP. proceed with connect() */
+		LOG_MESSAGE_LEAVE();
     return ns_finish_connect(nc, proto, &nc->sa, add_sock_opts);
   }
+	LOG_MESSAGE_LEAVE();
 }
 
 /*
- * Create listening connection.
- *
+ * Create listening connection.  *
  * See `ns_bind_opt` for full documentation.
  */
 struct ns_connection *ns_bind(struct ns_mgr *srv, const char *address,
@@ -1289,10 +1306,12 @@ struct ns_connection *ns_add_sock(struct ns_mgr *s, sock_t sock,
 struct ns_connection *ns_add_sock_opt(struct ns_mgr *s, sock_t sock,
                                       ns_event_handler_t callback,
                                       struct ns_add_sock_opts opts) {
+	LOG_MESSAGE_ENTER();
   struct ns_connection *nc = ns_create_connection(s, callback, opts);
   if (nc != NULL) {
     ns_set_sock(nc, sock);
   }
+	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
@@ -4302,6 +4321,8 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
                                       const char *extra_headers,
                                       const char *post_data,
                                       const char *save_to_file) {
+	LOG_MESSAGE_ENTER();
+
   struct ns_connection *nc;
   char addr[1100], path[4096]; /* NOTE: keep sizes in sync with sscanf below */
   int use_ssl = 0;
@@ -4359,6 +4380,7 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
               post_data == NULL ? "" : post_data);
   }
 
+	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
@@ -6412,7 +6434,7 @@ static int ns_get_ip_address_of_nameserver(char *name, size_t name_len) {
     /* Try to figure out what nameserver to use */
     for (ret--; fgets(line, sizeof(line), fp) != NULL;) {
       char buf[256];
-      if (sscanf(line, "nameserver %255[^\n]s", buf) == 1) {
+      if (sscanf(line, "nameserver %255[^\n #]s", buf) == 1) {
         snprintf(name, name_len, "udp://%s:53", buf);
         ret++;
         break;

@@ -1,5 +1,6 @@
 #include "ottdate.hpp"
 #include "fossa.h"
+#include "log.h"
 
 #include <iostream>
 
@@ -277,8 +278,7 @@ OttDate::EState OttDate::process_data( const char *json )
 //-----------------------------------------------------------------------------
 void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_data)
 {
-	fprintf(stderr,"ENTERING %s\n",__FUNCTION__);
-
+	LOG_MESSAGE_ENTER();
 	struct http_message *hm = (struct http_message *) ev_data;
 
 	switch (ev) {
@@ -316,12 +316,14 @@ void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_da
 		default:
 			break;
 	}
+	LOG_MESSAGE_LEAVE();
 }
 
 
 //-----------------------------------------------------------------------------
 void OttDate::handler_EState_Downloading(struct ns_connection *nc, int ev, void *ev_data)
 {
+	LOG_MESSAGE_ENTER();
 	struct http_message *hm = (struct http_message *) ev_data;
 	struct ns_str* content=0;
 
@@ -363,6 +365,7 @@ void OttDate::handler_EState_Downloading(struct ns_connection *nc, int ev, void 
 		default:
 			break;
 	}
+	LOG_MESSAGE_LEAVE();
 }
 
 
