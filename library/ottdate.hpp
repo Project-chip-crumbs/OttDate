@@ -52,6 +52,7 @@ private:
 	void enter_state( OttDate::EState state );
 	static void next_state( OttDate::EState state );
   char* getRaspiSerial();
+	int getStakVersion();
 
 	EState process_data( const char *json );
 	EState main_loop();

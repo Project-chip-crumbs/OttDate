@@ -41,7 +41,7 @@ OttDate::OttDate()
            , "{s: s, s: s, s: i, s: s}"
            , "product", "otto"
            , "component", "fullstak"
-           , "version", 101
+           , "version", getStakVersion()
            , "id", getRaspiSerial()
            );
 
@@ -519,6 +519,22 @@ char* OttDate::getRaspiSerial()
 
 	sprintf(buf,"UNKNOWN");
 	return buf;
+}
+
+
+//-----------------------------------------------------------------------------
+int OttDate::getStakVersion()
+{
+	static char buf[4096]="UNKNOWN";
+	FILE *fp = NULL;
+	if(!(fp = fopen("/stak/version","r"))) {
+		fprintf(stderr,"cannot open /stak/version\n");
+		return -1;
+	}
+
+	fgets(buf,sizeof(buf),fp);
+
+	return atoi(buf);
 }
 
 
