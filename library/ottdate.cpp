@@ -1,33 +1,38 @@
+
+#include <iostream>
+#include <time.h>
+
 #include "ottdate.hpp"
 #include "fossa.h"
 #include "log.h"
-
-#include <iostream>
 
 OttDate*            OttDate::s_instance   = 0;
 int                 OttDate::s_exit_flag  = 0;
 OttDate::EState     OttDate::s_cur_state  = OttDate::EState_Idle;
 OttDate::EState     OttDate::s_last_state = OttDate::EState_Undefined;
 char *              OttDate::s_last_http_message = 0;
+int                 OttDate::s_download_percentage = 0;
+time_t							OttDate::s_last_recv = 0;
 
 const int           OttDate::MD5_DIGEST_LENGTH = 16;
+const int           OttDate::TIMEOUT = 10;
 
 //-----------------------------------------------------------------------------
 OttDate::OttDate()
 	: m_url("http://update.s-t-a-k.com")
-	, m_output_filename("ottdate.zip")
+	, m_output_filename("/mnt/otto-update.zip")
 {
-	m_state_names.push_back("EState_Idle");
-	m_state_names.push_back("EState_Checking");
-	m_state_names.push_back("EState_NoUpdate");
-	m_state_names.push_back("EState_NoInternet");
-	m_state_names.push_back("EState_NoPower");
-	m_state_names.push_back("EState_Downloading");
-	m_state_names.push_back("EState_Verifying");
-	m_state_names.push_back("EState_DownloadFailed");
-	m_state_names.push_back("EState_ApplyingUpdate");
-	m_state_names.push_back("EState_UpdateFailed");
-	m_state_names.push_back("EState_AskForReboot");
+	m_state_names.push_back("Update?");
+	m_state_names.push_back("Checking...");
+	m_state_names.push_back("No Update");
+	m_state_names.push_back("No Internet");
+	m_state_names.push_back("No Power");
+	m_state_names.push_back("Downloading...");
+	m_state_names.push_back("Verifying...");
+	m_state_names.push_back("Download failed");
+	m_state_names.push_back("Applying Update");
+	m_state_names.push_back("Update failed");
+	m_state_names.push_back("Reboot?");
 
 	//assemble data for request:
 	m_post_data_len=1024;
@@ -41,6 +46,8 @@ OttDate::OttDate()
            );
 
 	m_mgr = new ns_mgr;
+
+	pthread_create(&m_thread,NULL,run_main_loop,NULL);
 }
 
 
@@ -59,6 +66,27 @@ OttDate* OttDate::instance()
 	}
 
 	return s_instance;
+}
+
+
+//-----------------------------------------------------------------------------
+bool OttDate::trigger_update()
+{
+	if(s_cur_state==EState_Idle) {
+		next_state(EState_Checking);
+		return true;
+	}
+
+	return false;
+}
+
+
+//-----------------------------------------------------------------------------
+void* OttDate::run_main_loop(void *)
+{
+	LOG_MESSAGE_ENTER();
+	while(true) OttDate::instance()->main_loop();
+	LOG_MESSAGE_LEAVE();
 }
 
 
@@ -85,9 +113,12 @@ void OttDate::enter_state( OttDate::EState state )
 			fprintf(stderr,"sending json: %s\n",m_post_data);
 
 			ns_mgr_init(m_mgr, NULL);
-			ns_connect_http(m_mgr, handler_EState_Check, m_url.c_str(), NULL, m_post_data, NULL);
-			//ns_connect_http(&mgr, handler_EState_Check, url, NULL, NULL, NULL);
-			s_exit_flag=0;
+			if(ns_connect_http(m_mgr, handler_EState_Check, m_url.c_str(), NULL, m_post_data, NULL)) {
+				s_exit_flag=0;
+			} else {
+				s_exit_flag=1;
+				next_state(EState_NoUpdate);
+			}
 			break;
 
 		case EState_NoUpdate:
@@ -100,12 +131,17 @@ void OttDate::enter_state( OttDate::EState state )
 			break;
 
 		case EState_Downloading:
+			s_download_percentage=0;
 			ns_mgr_init(m_mgr, NULL);
-			ns_connect_http( m_mgr, handler_EState_Downloading
+			if( ns_connect_http( m_mgr, handler_EState_Downloading
                      , m_update_response.url, NULL, NULL
                      , m_output_filename.c_str()
-                     );
-			s_exit_flag=0;
+                     ) ) {
+				s_exit_flag=0;
+			} else {
+				s_exit_flag=1;
+				next_state(EState_DownloadFailed);
+			}
 			break;
 
 		case EState_Verifying:
@@ -115,6 +151,13 @@ void OttDate::enter_state( OttDate::EState state )
 			break;
 
 		case EState_ApplyingUpdate:
+			if(system("/usr/bin/fwup -a -d /dev/mmcblk0 -t upgrade -i /mnt/otto-update.zip")) {
+				next_state(EState_UpdateFailed);
+			} else if(system("/usr/bin/fwup -a -d /dev/mmcblk0 -t on-reboot -i /mnt/finalize.fw")) {
+				next_state(EState_UpdateFailed);
+			}
+			system("/bin/rm /mnt/otto-update.zip");
+			system("/bin/rm /mnt/finalize.fw");
 			break;
 		case EState_UpdateFailed:
 			break;
@@ -123,6 +166,36 @@ void OttDate::enter_state( OttDate::EState state )
 	}
 
 	s_last_state=s_cur_state;
+}
+
+
+//-----------------------------------------------------------------------------
+void OttDate::state_name(std::string &s)
+{
+	if( s_cur_state!=EState_Undefined ) {
+		s=m_state_names[s_cur_state];
+	} else {
+		s="Undefinded";
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+std::string OttDate::state_name()
+{
+	if( s_cur_state!=EState_Undefined ) {
+		return m_state_names[s_cur_state];
+	}
+
+	return "Undefinded";
+}
+
+
+
+//-----------------------------------------------------------------------------
+int OttDate::download_percentage()
+{
+	return s_download_percentage;
 }
 
 
@@ -144,12 +217,11 @@ OttDate::EState OttDate::main_loop()
 	switch(s_cur_state)
 	{
 		case EState_Idle:
-			next_state(EState_Checking);
 			break;
 
 		case EState_Checking:
 			if (s_exit_flag == 0) {
-				ns_mgr_poll(m_mgr, 1000);
+				ns_mgr_poll(m_mgr, 100);
 				std::cerr<<"still checking...\n";
 			} else {
 				ns_mgr_free(m_mgr);
@@ -175,7 +247,7 @@ OttDate::EState OttDate::main_loop()
 
 		case EState_Downloading:
 			if (s_exit_flag == 0) {
-				ns_mgr_poll(m_mgr, 1000);
+				ns_mgr_poll(m_mgr, 100);
 			} else {
 				ns_mgr_free(m_mgr);
 				next_state(EState_Verifying);
@@ -191,23 +263,20 @@ OttDate::EState OttDate::main_loop()
 			break;
 
 		case EState_DownloadFailed:
-			sleep(1);
+			sleep(2);
 			next_state(EState_Idle);
 			break;
 
 		case EState_ApplyingUpdate:
-			sleep(3);
 			next_state(EState_AskForReboot);	
 			break;
 
 		case EState_UpdateFailed:
-			sleep(1);
+			sleep(2);
 			next_state(EState_Idle);
 			break;
 
 		case EState_AskForReboot:
-			sleep(1);
-			next_state(EState_Idle);
 			break;
 	}
 
@@ -282,6 +351,13 @@ void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_da
 	struct http_message *hm = (struct http_message *) ev_data;
 
 	switch (ev) {
+		case NS_POLL:
+			if(time(0)-s_last_recv > TIMEOUT) {
+				fprintf(stderr,"timeout\n");
+				s_exit_flag = 1;
+			}
+			break;
+
 		case NS_CONNECT:
 			if (* (int *) ev_data != 0) {
 				fprintf(stderr, "connect() failed: %s\n", strerror(* (int *) ev_data));
@@ -289,6 +365,7 @@ void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_da
 				s_exit_flag = 1;
 			} else {
 				fprintf(stderr,"connected\n");
+				s_last_recv = time(0);
 			}
 			break;
 
@@ -305,9 +382,9 @@ void OttDate::handler_EState_Check(struct ns_connection *nc, int ev, void *ev_da
 			s_exit_flag = 1;
 			break;
 
-			//		case NS_RECV:
-			//			fprintf(stderr,"r\n");
-			//      break;
+	 case NS_RECV:
+		  s_last_recv = time(0);	
+			break;
 
 		case NS_CLOSE:
 			s_exit_flag = 1;
@@ -333,21 +410,31 @@ void OttDate::handler_EState_Downloading(struct ns_connection *nc, int ev, void 
 	static int progress_i=0;
 
 	switch (ev) {
+		case NS_POLL:
+			if(time(0)-s_last_recv > TIMEOUT) {
+				fprintf(stderr,"timeout\n");
+				s_exit_flag = 1;
+			}
+			break;
+
 		case NS_CONNECT:
 			if (* (int *) ev_data != 0) {
 				fprintf(stderr, "connect() failed: %s\n", strerror(* (int *) ev_data));
 				s_cur_state=EState_Idle;
 				s_exit_flag = 1;
 			}
+			some=0;
 			break;
 
 		case NS_RECV:
 			some+=*(int*)ev_data;
 			if(full>0) {
 				fprintf(stderr,"\rdownloading: %10d / %10d",some,full);
+				s_download_percentage = (float)(some)/full*100;
 			} else {
 				fprintf(stderr,"\rdownloading: %c",progress[(progress_i++)%4]);
 			}
+		  s_last_recv = time(0);	
 			break;
 
 		case NS_HTTP_REPLY:

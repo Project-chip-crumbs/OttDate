@@ -11,11 +11,11 @@ set( ${PROJECT_NAME}_VERSION ${PROJECT_NAME}_MAJOR_VERSION.${PROJECT_NAME}_MINOR
 
 # -- BEGIN: OttDate specific ---
 find_package( OpenSSL REQUIRED )
+find_package( Threads REQUIRED )
 
 include_directories( "${PROJECT_SOURCE_DIR}/library" )
 include_directories( "${PROJECT_SOURCE_DIR}" )
 include_directories( "${PROJECT_BINARY_DIR}" )
-
 
 add_subdirectory(example)
 add_subdirectory(library)

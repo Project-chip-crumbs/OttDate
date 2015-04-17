@@ -4351,10 +4351,12 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
 
 			if ((dp = (struct proto_data_http *) NS_CALLOC(1, sizeof(*dp))) == NULL) {
 				fprintf(stderr,"TODO: HANDLE THIS horrible error!\n");
+				return NULL;
 			} else if ((dp->fp = fopen(save_to_file, "wp")) == NULL) {
-				fprintf(stderr,"TODO: HANDLE THIS horrible error!\n");
+				fprintf(stderr,"ERROR: cannot open %s for writing\n",save_to_file);
 				NS_FREE(dp);
 				nc->proto_data = NULL;
+				return NULL;
 			} else {
 				dp->type = DATA_FILE_DOWNLOAD;
 				dp->cl = -1;
