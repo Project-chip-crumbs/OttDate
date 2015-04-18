@@ -312,6 +312,7 @@ struct ns_connection {
 
   sock_t sock;             /* Socket to the remote peer */
   union socket_address sa; /* Remote peer address */
+  size_t recv_iobuf_limit; /* Max size of recv buffer */
   struct iobuf recv_iobuf; /* Received data */
   struct iobuf send_iobuf; /* Data scheduled for sending */
   SSL *ssl;
@@ -669,8 +670,7 @@ int ns_http_create_digest_auth_header(char *buf, size_t buf_len,
                                       const char *auth_domain, const char *user,
                                       const char *passwd);
 struct ns_connection *ns_connect_http(struct ns_mgr *, ns_event_handler_t,
-                                      const char *, const char *, const char *,
-                                      const char *);
+                                      const char *, const char *, const char *, const char *);
 
 /*
  * This structure defines how `ns_serve_http()` works.

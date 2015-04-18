@@ -1,6 +1,4 @@
 #include "fossa.h"
-#include "log.h"
-
 #ifdef NS_MODULE_LINES
 #line 1 "src/internal.h"
 /**/
@@ -492,6 +490,12 @@ NS_INTERNAL struct ns_connection *ns_create_connection(
     conn->last_io_time = time(NULL);
     conn->flags = opts.flags;
     conn->user_data = opts.user_data;
+    /*
+     * SIZE_MAX is defined as a long long constant in
+     * system headers on some platforms and so it
+     * doesn't compile with pedantic ansi flags.
+     */
+    conn->recv_iobuf_limit = ~0;
   }
 
   return conn;
@@ -712,6 +716,7 @@ static struct ns_connection *accept_conn(struct ns_connection *ls) {
     c->proto_data = ls->proto_data;
     c->proto_handler = ls->proto_handler;
     c->user_data = ls->user_data;
+    c->recv_iobuf_limit = ls->recv_iobuf_limit;
     ns_call(c, NS_ACCEPT, &sa);
     DBG(("%p %d %p %p", c, c->sock, c->ssl_ctx, c->ssl));
   }
@@ -727,6 +732,13 @@ static int ns_is_error(int n) {
                     WSAGetLastError() != WSAEWOULDBLOCK
 #endif
                     );
+}
+
+static size_t recv_avail_size(struct ns_connection *conn, size_t max) {
+  size_t avail;
+  if (conn->recv_iobuf_limit < conn->recv_iobuf.len) return 0;
+  avail = conn->recv_iobuf_limit - conn->recv_iobuf.len;
+  return avail > max ? max : avail;
 }
 
 static void ns_read_from_socket(struct ns_connection *conn) {
@@ -792,7 +804,8 @@ static void ns_read_from_socket(struct ns_connection *conn) {
   } else
 #endif
   {
-    while ((n = (int) recv(conn->sock, buf, sizeof(buf), 0)) > 0) {
+    while ((n = (int) recv(conn->sock, buf, recv_avail_size(conn, sizeof(buf)),
+                           0)) > 0) {
       DBG(("%p %lu <- %d bytes (PLAIN)", conn, conn->flags, n));
       iobuf_append(&conn->recv_iobuf, buf, n);
       ns_call(conn, NS_RECV, &n);
@@ -927,15 +940,14 @@ time_t ns_mgr_poll(struct ns_mgr *mgr, int milli) {
       continue;
     }
 
-    if (!(nc->flags & NSF_WANT_WRITE)) {
-      /*DBG(("%p read_set", nc)); */
+    if (!(nc->flags & NSF_WANT_WRITE) &&
+        nc->recv_iobuf.len < nc->recv_iobuf_limit) {
       ns_add_to_set(nc->sock, &read_set, &max_fd);
     }
 
     if (((nc->flags & NSF_CONNECTING) && !(nc->flags & NSF_WANT_READ)) ||
         (nc->send_iobuf.len > 0 && !(nc->flags & NSF_CONNECTING) &&
          !(nc->flags & NSF_DONT_SEND))) {
-      /*DBG(("%p write_set", nc)); */
       ns_add_to_set(nc->sock, &write_set, &max_fd);
       ns_add_to_set(nc->sock, &err_set, &max_fd);
     }
@@ -1028,8 +1040,6 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
                                                     int proto,
                                                     union socket_address *sa,
                                                     struct ns_add_sock_opts o) {
-	LOG_MESSAGE_ENTER();
-
   sock_t sock = INVALID_SOCKET;
   int rc;
 
@@ -1042,8 +1052,6 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     ns_call(nc, NS_CONNECT, &failure);
     ns_call(nc, NS_CLOSE, NULL);
     ns_destroy_conn(nc);
-		LOG_MSG("cannot create socket");
-		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1056,8 +1064,6 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     ns_call(nc, NS_CLOSE, NULL);
     ns_destroy_conn(nc);
     close(sock);
-		LOG_MSG("cannot connect to socket");
-		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1071,10 +1077,10 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
     nc->flags |= NSF_CONNECTING;
   }
 
-	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
+#ifndef NS_DISABLE_RESOLVER
 /*
  * Callback for the async resolver on ns_connect_opt() call.
  * Main task of this function is to trigger NS_CONNECT event with
@@ -1083,39 +1089,38 @@ NS_INTERNAL struct ns_connection *ns_finish_connect(struct ns_connection *nc,
  */
 static void resolve_cb(struct ns_dns_message *msg, void *data) {
   struct ns_connection *nc = (struct ns_connection *) data;
+  int i;
+  int failure = -1;
 
-  if (msg != NULL) { 
-		/*
-		 * Take the first DNS A answer and run...
-		 */
-		int i=0;
-		for(i=0; i<msg->num_answers; i++ )
-		{
-			if(msg->answers[i].rtype==NS_DNS_A_RECORD) {
-				static struct ns_add_sock_opts opts;
-				/*
-				 * Async resolver guarantees that there is at least one answer.
-				 * TODO(lsm): handle IPv6 answers too
-				 */
-				ns_dns_parse_record_data(msg, &msg->answers[i], &nc->sa.sin.sin_addr, 4);
-				/* ns_finish_connect() triggers NS_CONNECT on failure */
-				ns_finish_connect(nc, nc->flags & NSF_UDP ? SOCK_DGRAM : SOCK_STREAM,
-						&nc->sa, opts);
-				return;
-			}
-		}
-	}	
+  if (msg != NULL) {
+    /*
+     * Take the first DNS A answer and run...
+     */
+    for (i = 0; i < msg->num_answers; i++) {
+      if (msg->answers[i].rtype == NS_DNS_A_RECORD) {
+        static struct ns_add_sock_opts opts;
+        /*
+         * Async resolver guarantees that there is at least one answer.
+         * TODO(lsm): handle IPv6 answers too
+         */
+        ns_dns_parse_record_data(msg, &msg->answers[i], &nc->sa.sin.sin_addr,
+                                 4);
+        /* ns_finish_connect() triggers NS_CONNECT on failure */
+        ns_finish_connect(nc, nc->flags & NSF_UDP ? SOCK_DGRAM : SOCK_STREAM,
+                          &nc->sa, opts);
+        return;
+      }
+    }
+  }
 
-	/*
-	 * If we get there was no NS_DNS_A_RECORD in the answer
-	 */
-	int failure = -1;
-	ns_call(nc, NS_CONNECT, &failure);
-	ns_call(nc, NS_CLOSE, NULL);
-	ns_destroy_conn(nc);
-
+  /*
+   * If we get there was no NS_DNS_A_RECORD in the answer
+   */
+  ns_call(nc, NS_CONNECT, &failure);
+  ns_call(nc, NS_CLOSE, NULL);
+  ns_destroy_conn(nc);
 }
-
+#endif
 /*
  * Connect to a remote host.
  *
@@ -1173,7 +1178,6 @@ struct ns_connection *ns_connect(struct ns_mgr *mgr, const char *address,
 struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
                                      ns_event_handler_t callback,
                                      struct ns_connect_opts opts) {
-	LOG_MESSAGE_ENTER();
   struct ns_connection *nc = NULL;
   int proto, rc;
   struct ns_add_sock_opts add_sock_opts;
@@ -1182,16 +1186,12 @@ struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
   NS_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
 
   if ((nc = ns_create_connection(mgr, callback, add_sock_opts)) == NULL) {
-		LOG_MSG("ns_create_connection returned NULL");
-		LOG_MESSAGE_LEAVE();
     return NULL;
   } else if ((rc = ns_parse_address(address, &nc->sa, &proto, host,
                                     sizeof(host))) < 0) {
     /* Address is malformed */
     NS_SET_PTRPTR(opts.error_string, "cannot parse address");
     ns_destroy_conn(nc);
-		LOG_MESSAGE("could not parse address: %s\n",address);
-		LOG_MESSAGE_LEAVE();
     return NULL;
   }
 
@@ -1199,8 +1199,8 @@ struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
   nc->flags |= (proto == SOCK_DGRAM) ? NSF_UDP : 0;
   nc->user_data = opts.user_data;
 
-
   if (rc == 0) {
+#ifndef NS_DISABLE_RESOLVER
     /*
      * DNS resolution is required for host.
      * ns_parse_address() fills port in nc->sa, which we pass to resolve_cb()
@@ -1209,21 +1209,24 @@ struct ns_connection *ns_connect_opt(struct ns_mgr *mgr, const char *address,
     if (ns_resolve_async(nc->mgr, host, NS_DNS_A_RECORD, resolve_cb, nc) != 0) {
       NS_SET_PTRPTR(opts.error_string, "cannot schedule DNS lookup");
       ns_destroy_conn(nc);
-			LOG_MSG("cannot schedule DNS lookup");
-			LOG_MESSAGE_LEAVE();
       return NULL;
     }
+
     return nc;
+#else
+    NS_SET_PTRPTR(opts.error_string, "Resolver is disabled");
+    ns_destroy_conn(nc);
+    return NULL;
+#endif
   } else {
     /* Address is parsed and resolved to IP. proceed with connect() */
-		LOG_MESSAGE_LEAVE();
     return ns_finish_connect(nc, proto, &nc->sa, add_sock_opts);
   }
-	LOG_MESSAGE_LEAVE();
 }
 
 /*
- * Create listening connection.  *
+ * Create listening connection.
+ *
  * See `ns_bind_opt` for full documentation.
  */
 struct ns_connection *ns_bind(struct ns_mgr *srv, const char *address,
@@ -1306,12 +1309,10 @@ struct ns_connection *ns_add_sock(struct ns_mgr *s, sock_t sock,
 struct ns_connection *ns_add_sock_opt(struct ns_mgr *s, sock_t sock,
                                       ns_event_handler_t callback,
                                       struct ns_add_sock_opts opts) {
-	LOG_MESSAGE_ENTER();
   struct ns_connection *nc = ns_create_connection(s, callback, opts);
   if (nc != NULL) {
     ns_set_sock(nc, sock);
   }
-	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
@@ -2501,23 +2502,17 @@ static void transfer_file_data(struct ns_connection *nc) {
 }
 
 static void http_download_handler(struct ns_connection *nc, int ev, void *ev_data) {
-  struct iobuf *io = &nc->recv_iobuf;
-  struct ns_str *vec;
-  int res_len;
-	struct proto_data_http *dp;
+  if (nc->proto_data != NULL )
+  {
+    transfer_file_data(nc);
 
- 	if (nc->proto_data != NULL )
-	{
-		dp = (struct proto_data_http *)nc->proto_data;
-		transfer_file_data(nc);
-
-		if(nc->proto_data==NULL) {
-			nc->handler(nc, NS_CLOSE, NULL);
-		}
-	}
+    if(nc->proto_data==NULL) {
+      nc->handler(nc, NS_CLOSE, NULL);
+    }
+  }
 
   nc->handler(nc, ev, ev_data);
-	
+  
 }
 
 static void http_handler(struct ns_connection *nc, int ev, void *ev_data) {
@@ -2526,7 +2521,6 @@ static void http_handler(struct ns_connection *nc, int ev, void *ev_data) {
   struct ns_str *vec;
   int req_len;
   struct proto_data_http *dp=NULL;
-
   /*
    * For HTTP messages without Content-Length, always send HTTP message
    * before NS_CLOSE message.
@@ -2542,8 +2536,8 @@ static void http_handler(struct ns_connection *nc, int ev, void *ev_data) {
   if (nc->proto_data != NULL) {
     dp = (struct proto_data_http *)nc->proto_data;
     if(dp->cl>0) {
-			transfer_file_data(nc);
-		}
+      transfer_file_data(nc);
+    }
   }
 
   nc->handler(nc, ev, ev_data);
@@ -2591,7 +2585,6 @@ static void http_handler(struct ns_connection *nc, int ev, void *ev_data) {
       nc->handler(nc, nc->listener ? NS_HTTP_REQUEST : NS_HTTP_REPLY, &hm);
       iobuf_remove(io, hm.message.len);
     }
-
   }
 }
 
@@ -4304,15 +4297,19 @@ void ns_serve_http(struct ns_connection *nc, struct http_message *hm,
  * Helper function that creates outbound HTTP connection.
  *
  * If `post_data` is NULL, then GET request is created. Otherwise, POST request
- * is created with the specified POST data. Examples:
+ * is created with the specified POST data.
+ * If `save_to_file` is path to a writeable file, the body of the HTTP response is written to that file.
+ * Examples:
  *
  * [source,c]
  * ----
  *   nc1 = ns_connect_http(mgr, ev_handler_1, "http://www.google.com", NULL,
- *                         NULL);
- *   nc2 = ns_connect_http(mgr, ev_handler_1, "https://github.com", NULL, NULL);
+ *                         NULL, NULL);
+ *   nc2 = ns_connect_http(mgr, ev_handler_1, "https://github.com", NULL, NULL, NULL);
  *   nc3 = ns_connect_http(mgr, ev_handler_1, "my_server:8000/form_submit/",
- *                         NULL, "var_1=value_1&var_2=value_2");
+ *                         NULL, "var_1=value_1&var_2=value_2", NULL);
+ *   nc4 = ns_connect_http(mgr, ev_handler_1, "my_server:8000/a_nice_picture.png",
+ *                         NULL, NULL, "a_nice_picture.png");
  * ----
  */
 struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
@@ -4320,9 +4317,7 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
                                       const char *url,
                                       const char *extra_headers,
                                       const char *post_data,
-                                      const char *save_to_file) {
-	LOG_MESSAGE_ENTER();
-
+                                      const char *save_to_file ) {
   struct ns_connection *nc;
   char addr[1100], path[4096]; /* NOTE: keep sizes in sync with sscanf below */
   int use_ssl = 0;
@@ -4346,27 +4341,27 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
   }
 
   if ((nc = ns_connect(mgr, addr, ev_handler)) != NULL) {
-		if( save_to_file ) {
-			struct proto_data_http *dp;
+    if( save_to_file ) {
+      struct proto_data_http *dp;
 
-			if ((dp = (struct proto_data_http *) NS_CALLOC(1, sizeof(*dp))) == NULL) {
-				fprintf(stderr,"TODO: HANDLE THIS horrible error!\n");
-				return NULL;
-			} else if ((dp->fp = fopen(save_to_file, "wp")) == NULL) {
-				fprintf(stderr,"ERROR: cannot open %s for writing\n",save_to_file);
-				NS_FREE(dp);
-				nc->proto_data = NULL;
-				return NULL;
-			} else {
-				dp->type = DATA_FILE_DOWNLOAD;
-				dp->cl = -1;
-				dp->sent = 0;
-				dp->cgi_nc = NULL;
-				nc->proto_data = dp;
-			}
-		}
+      if ((dp = (struct proto_data_http *) NS_CALLOC(1, sizeof(*dp))) == NULL) {
+        fprintf(stderr,"TODO: HANDLE THIS horrible error!\n");
+        return NULL;
+      } else if ((dp->fp = fopen(save_to_file, "wp")) == NULL) {
+        fprintf(stderr,"ERROR: cannot open %s for writing\n",save_to_file);
+        NS_FREE(dp);
+        nc->proto_data = NULL;
+        return NULL;
+      } else {
+        dp->type = DATA_FILE_DOWNLOAD;
+        dp->cl = -1;
+        dp->sent = 0;
+        dp->cgi_nc = NULL;
+        nc->proto_data = dp;
+      }
+    }
 
-		ns_set_protocol_http_websocket(nc);
+    ns_set_protocol_http_websocket(nc);
 
     if (use_ssl) {
 #ifdef NS_ENABLE_SSL
@@ -4382,7 +4377,6 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
               post_data == NULL ? "" : post_data);
   }
 
-	LOG_MESSAGE_LEAVE();
   return nc;
 }
 
@@ -6398,9 +6392,9 @@ static int ns_get_ip_address_of_nameserver(char *name, size_t name_len) {
 
   if ((err = RegOpenKey(HKEY_LOCAL_MACHINE, key, &hKey)) != ERROR_SUCCESS) {
     fprintf(stderr, "cannot open reg key %s: %d\n", key, err);
-    ret--;
+    ret = -1;
   } else {
-    for (ret--, i = 0;
+    for (ret = -1, i = 0;
          RegEnumKey(hKey, i, subkey, sizeof(subkey)) == ERROR_SUCCESS; i++) {
       DWORD type, len = sizeof(value);
       if (RegOpenKey(hKey, subkey, &hSub) == ERROR_SUCCESS &&
@@ -6412,14 +6406,18 @@ static int ns_get_ip_address_of_nameserver(char *name, size_t name_len) {
          * See https://github.com/cesanta/fossa/issues/176
          * The value taken from the registry can be empty, a single
          * IP address, or multiple IP addresses separated by comma.
+         * If it's empty, check the next interface.
          * If it's multiple IP addresses, take the first one.
          */
         char *comma = strchr(value, ',');
+        if (value[0] == '\0') {
+          continue;
+        }
         if (comma != NULL) {
           *comma = '\0';
         }
-        strncpy(name, value, name_len);
-        ret++;
+        snprintf(name, name_len, "udp://%s:53", value);
+        ret = 0;
         RegCloseKey(hSub);
         break;
       }
@@ -6431,14 +6429,14 @@ static int ns_get_ip_address_of_nameserver(char *name, size_t name_len) {
   char line[512];
 
   if ((fp = fopen("/etc/resolv.conf", "r")) == NULL) {
-    ret--;
+    ret = -1;
   } else {
     /* Try to figure out what nameserver to use */
-    for (ret--; fgets(line, sizeof(line), fp) != NULL;) {
+    for (ret = -1; fgets(line, sizeof(line), fp) != NULL;) {
       char buf[256];
-      if (sscanf(line, "nameserver %255[^\n #]s", buf) == 1) {
+      if (sscanf(line, "nameserver %255[^\n\t #]s", buf) == 1) {
         snprintf(name, name_len, "udp://%s:53", buf);
-        ret++;
+        ret = 0;
         break;
       }
     }
