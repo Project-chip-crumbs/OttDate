@@ -42,6 +42,9 @@ public:
 	void   state_name( std::string &s );
 	std::string state_name();
 	bool   trigger_update();
+
+  static std::string parse_hostname( const std::string& url, int *pos=0, int *len=0 );
+  static std::string resolve_url( const std::string& url );
  
 private:
 	OttDate();
@@ -62,7 +65,6 @@ private:
 	static void handler_EState_Downloading(struct ns_connection *nc, int ev, void *ev_data);
 
   int verify_md5(const std::string &filename,const std::string &md5sum);
-
 	
   std::vector<std::string> m_state_names;
 	int                      m_post_data_len;

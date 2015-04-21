@@ -4299,6 +4299,8 @@ void ns_serve_http(struct ns_connection *nc, struct http_message *hm,
  * If `post_data` is NULL, then GET request is created. Otherwise, POST request
  * is created with the specified POST data.
  * If `save_to_file` is path to a writeable file, the body of the HTTP response is written to that file.
+ * If `extra_headers` contains "Host: some_host_name\r\n" this will be used in the HTTP request.
+ * Otherwise, the hostname will be extracted from the url.
  * Examples:
  *
  * [source,c]
@@ -4321,6 +4323,8 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
   struct ns_connection *nc;
   char addr[1100], path[4096]; /* NOTE: keep sizes in sync with sscanf below */
   int use_ssl = 0;
+  char *host=NULL;
+  char *tmp_extra_headers = NULL;
 
   if (memcmp(url, "http://", 7) == 0) {
     url += 7;
@@ -4369,12 +4373,43 @@ struct ns_connection *ns_connect_http(struct ns_mgr *mgr,
 #endif
     }
 
+    /* check if host is specified in extra-headers */
+    if(extra_headers)
+    {
+      /* copy exta_headers and modify copy only */
+      tmp_extra_headers = NS_MALLOC(sizeof(char)*(strlen(extra_headers)+1));
+      strcpy(tmp_extra_headers,extra_headers);
+      
+      const char *pat = "Host: ";
+      int pat_len = strlen(pat);
+      char *p1 = strstr(tmp_extra_headers,pat);
+      if(p1) {
+        char *p2 = strstr(p1,"\r\n");
+        if(p2 || (p2-p1)>pat_len) {
+          host = NS_MALLOC(sizeof(char)*(p2-p1-pat_len+1));
+          strncpy(host,p1+pat_len,p2-p1-pat_len);
+          host[p2-p1-pat_len]=0;
+
+          /* cut out the Host: ... \r\n from tmp_extra_headers */
+          strcpy(p1,p2+2);
+        }
+      } 
+    }
+
     ns_printf(nc,
               "%s /%s HTTP/1.1\r\nHost: %s\r\nContent-Length: %lu\r\n%s\r\n%s",
-              post_data == NULL ? "GET" : "POST", path, addr,
+              post_data == NULL ? "GET" : "POST", path,
+              host == NULL? addr : host,
               post_data == NULL ? 0 : strlen(post_data),
-              extra_headers == NULL ? "" : extra_headers,
+              tmp_extra_headers == NULL ? "" : tmp_extra_headers,
               post_data == NULL ? "" : post_data);
+
+    if(host) {
+      NS_FREE(host);
+    }
+    if(tmp_extra_headers) {
+      NS_FREE(tmp_extra_headers);
+    }
   }
 
   return nc;
@@ -6522,8 +6557,8 @@ static void ns_resolve_async_eh(struct ns_connection *nc, int ev, void *data) {
 /* See `ns_resolve_async_opt` */
 int ns_resolve_async(struct ns_mgr *mgr, const char *name, int query,
                      ns_resolve_callback_t cb, void *data) {
-  static struct ns_resolve_async_opts opts;
-  return ns_resolve_async_opt(mgr, name, query, cb, data, opts);
+    static struct ns_resolve_async_opts opts;
+    return ns_resolve_async_opt(mgr, name, query, cb, data, opts);
 }
 
 /*
