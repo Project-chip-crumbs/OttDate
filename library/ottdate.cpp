@@ -150,7 +150,7 @@ void OttDate::enter_state( OttDate::EState state )
 
     case EState_Downloading: {
       // prepare extra_headers 
-      std::string hostname = parse_hostname(m_url);
+      std::string hostname = parse_hostname(m_update_response.url);
       static char extra_headers[2048];
       std::stringstream ss;
       ss<<"Host: "<<hostname<<"\r\n";
