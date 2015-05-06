@@ -21,6 +21,7 @@ const int           OttDate::TIMEOUT = 10;
 //-----------------------------------------------------------------------------
 OttDate::OttDate()
   : m_output_filename("/mnt/otto-update.zip")
+  , m_current_version(-1)
 {
   m_url="";
   std::ifstream f("/stak/updateurl");
@@ -53,7 +54,7 @@ OttDate::OttDate()
            , "{s: s, s: s, s: i, s: s}"
            , "product", "otto"
            , "component", "fullstak"
-           , "version", getStakVersion()
+           , "version", current_version()
            , "id", getRaspiSerial()
            );
 
@@ -574,18 +575,21 @@ char* OttDate::getRaspiSerial()
 
 
 //-----------------------------------------------------------------------------
-int OttDate::getStakVersion()
+int OttDate::current_version()
 {
-  static char buf[4096]="UNKNOWN";
-  FILE *fp = NULL;
-  if(!(fp = fopen("/stak/version","r"))) {
-    fprintf(stderr,"cannot open /stak/version\n");
-    return 1;
+  if(m_current_version==-1) {
+    static char buf[4096]="UNKNOWN";
+    FILE *fp = NULL;
+    if(!(fp = fopen("/stak/version","r"))) {
+      fprintf(stderr,"cannot open /stak/version\n");
+      return -1;
+    }
+
+    fgets(buf,sizeof(buf),fp);
+    m_current_version=atoi(buf);
   }
 
-  fgets(buf,sizeof(buf),fp);
-
-  return atoi(buf);
+  return m_current_version;
 }
 
 

@@ -42,6 +42,7 @@ public:
 	void   state_name( std::string &s );
 	std::string state_name();
 	bool   trigger_update();
+  int current_version();
 
   static std::string parse_hostname( const std::string& url, int *pos=0, int *len=0 );
   static std::string resolve_url( const std::string& url );
@@ -55,7 +56,6 @@ private:
 	void enter_state( OttDate::EState state );
 	static void next_state( OttDate::EState state );
   char* getRaspiSerial();
-	int getStakVersion();
 
 	EState process_data( const char *json );
 	EState main_loop();
@@ -73,6 +73,7 @@ private:
 	std::string              m_url;
 	std::string              m_output_filename;
 	UpdateResponse           m_update_response;
+  int                      m_current_version;
 
 	static char *            s_last_http_message;
 	static int               s_exit_flag;
