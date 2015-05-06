@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <time.h>
 
@@ -19,9 +20,20 @@ const int           OttDate::TIMEOUT = 10;
 
 //-----------------------------------------------------------------------------
 OttDate::OttDate()
-  : m_url("http://update.s-t-a-k.com")
-  , m_output_filename("/mnt/otto-update.zip")
+  : m_output_filename("/mnt/otto-update.zip")
 {
+  m_url="";
+  std::ifstream f("/stak/updateurl");
+  if(f.is_open())
+  {
+    std::getline(f,m_url);
+    f.close();
+  }
+
+  if(m_url.size()<3) {
+    m_url = std::string("http://update.s-t-a-k.com");
+  }
+
   m_state_names.push_back("Update?");
   m_state_names.push_back("Checking...");
   m_state_names.push_back("No Update");
